@@ -1,8 +1,15 @@
 #include <fstream>
 #include <iostream>
+#include <random>
 #include <regex>
+#include <set>
 #include <unordered_map>
 #include <vector>
+
+using Messages = std::unordered_map<std::string, std::vector<std::string>>;
+
+std::random_device rd;
+std::mt19937 gen(rd());
 
 std::string read_file(std::string const &filename) {
   std::ifstream stream(filename);
@@ -21,14 +28,14 @@ std::string read_file(std::string const &filename) {
   return data;
 }
 
-std::unordered_map<std::string, std::vector<std::string>> filter_data(std::string const &data, bool filter_attachments = true, bool filter_embeds = true) {
+Messages filter_data(std::string const &data, bool filter_attachments = true, bool filter_embeds = true) {
   std::regex new_msg_header_regex(R"(\[([0-9]+\/?)+ [0-9]+:[0-9]+\] (heon5|kadak9))");
   auto it_begin = std::sregex_iterator(std::begin(data), std::end(data), new_msg_header_regex);
   auto it_end = std::sregex_iterator();
 
   std::cout << "msgs: " << std::distance(it_begin, it_end) << std::endl;
   
-  std::unordered_map<std::string, std::vector<std::string>> messages;
+  Messages messages;
   while (it_begin != it_end) {
     auto match = *it_begin;
     auto next_it = std::next(it_begin);
@@ -57,8 +64,66 @@ std::unordered_map<std::string, std::vector<std::string>> filter_data(std::strin
   return messages;
 } 
 
+struct Bigram {
+  Bigram() {}
+  Bigram(Messages &messages, std::string const &user) : user(user) {
+    std::set<char> vocab;
+    for (std::string const &msg : messages[user])
+      for (char c : msg)
+        vocab.insert(c);
+    std::cout << "Vocab size -> " << vocab.size() << std::endl;
+
+    // mappings char -> int
+    int index = 0;
+    for (char c : vocab)
+      char_to_int[c] = index++;
+
+    // mappings int -> char
+    for (auto [c, i] : char_to_int)
+      int_to_char[i] = c;
+
+    counts.assign(vocab.size() + 2, std::vector<int>(vocab.size() + 2));
+    for (std::string const &msg : messages[user]) {
+      // starting character <S>
+      int previous = vocab.size(); 
+      for (char c : msg) {
+        counts[previous][char_to_int[c]]++;
+        previous = char_to_int[c];
+      }
+      // ending character <E>
+      counts[previous][vocab.size() + 1]++;
+    }
+  }
+
+  int next_character(int previous_character_index) {
+    std::discrete_distribution<> d(std::begin(counts[previous_character_index]), std::end(counts[previous_character_index]));
+    return d(gen);
+  }
+
+  std::string generate_sentence() {
+    std::string sentence;
+    int previous_character = char_to_int.size();
+    while ((previous_character = next_character(previous_character)) != char_to_int.size() + 1) 
+      sentence += int_to_char[previous_character]; 
+    return sentence; 
+  }
+
+  std::vector<std::vector<int>> counts;
+  std::unordered_map<char, int> char_to_int;
+  std::unordered_map<int, char> int_to_char;
+  std::string user;
+};
+
 int main() {
   auto messages = filter_data(read_file("data.txt"));
   std::cout << "msgs by heon5: " << messages["heon5"].size() << std::endl;
   std::cout << "msgs by kadak9: " << messages["kadak9"].size() << std::endl;
+  Bigram heon(messages, "heon5");
+  Bigram kadak(messages, "kadak9");
+  for (int i = 0; i < 50; i++) {
+    std::cout << i << ". " << "kadak says: " << std::endl;
+    std::cout << kadak.generate_sentence() << std::endl;
+    std::cout << i << ". " << "heon says: " << std::endl;
+    std::cout << kadak.generate_sentence() << std::endl;
+  }
 }
