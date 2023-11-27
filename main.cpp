@@ -1,10 +1,14 @@
+#include <atomic>
 #include <fstream>
 #include <iostream>
+#include <mutex>
 #include <random>
 #include <regex>
 #include <set>
 #include <unordered_map>
 #include <vector>
+#include <thread>
+#include <cassert>
 
 using Messages = std::unordered_map<std::string, std::vector<std::string>>;
 
@@ -18,7 +22,7 @@ std::string read_file(std::string const &filename) {
   stream.seekg(0, std::ios_base::end);
   int len = stream.tellg();
   
-  std::cout << "Length -> " << len << std::endl;
+  std::cout << "Total length is " << len << " characters" << std::endl;
   
   std::string data(len, ' ');
   // bring the pointer to the beggining
@@ -34,7 +38,7 @@ Messages filter_data(std::string const &data, std::string const &user_1, std::st
   auto it_begin = std::sregex_iterator(std::begin(data), std::end(data), new_msg_header_regex);
   auto it_end = std::sregex_iterator();
 
-  std::cout << "msgs: " << std::distance(it_begin, it_end) << std::endl;
+  std::cout << "Message count is " << std::distance(it_begin, it_end) << std::endl;
   
   Messages messages;
   while (it_begin != it_end) {
@@ -56,9 +60,9 @@ Messages filter_data(std::string const &data, std::string const &user_1, std::st
       skip = true;
     if (filter_embeds && msg.find("{Embed}") != std::string::npos)
       skip = true;
-    
     if (!skip)
       messages[user].push_back(msg);
+
     it_begin++;
   }
 
@@ -67,34 +71,54 @@ Messages filter_data(std::string const &data, std::string const &user_1, std::st
 
 template<int n>
 struct Ngram {
-  struct PrefixGram {
-    PrefixGram() {}
-    PrefixGram(int character) {
+  struct ContextWindow {
+    ContextWindow() = default;
+
+    ContextWindow(int character) {
       for (int i = 0; i < n - 1; i++)
-        gram.push_back(character);
+        window.push_back(character);
     }
 
-    bool operator<(PrefixGram const &other) const {
-      return this->gram < other.gram;
+    bool operator<(ContextWindow const &other) const {
+      return this->window < other.window;
+    }
+
+    bool operator==(ContextWindow const &other) const {
+      return this->window == other.window;
     }
     
     void add(int character) {
-      gram.push_back(character);
-      if (gram.size() == n)
-        gram.pop_front();
+      window.push_back(character);
+      if (window.size() == n)
+        window.pop_front();
     }
 
-    std::deque<int> gram;
+    std::deque<int> window;
+  };
+
+  // https://stackoverflow.com/a/72073933 
+  struct ContextWindow_hash {
+    std::size_t operator()(ContextWindow const &cw) const {
+      std::size_t seed = cw.window.size(); 
+      for (auto x : cw.window) {
+        x = ((x >> 16) ^ x) * 0x45d9f3b;
+        x = ((x >> 16) ^ x) * 0x45d9f3b;
+        x = (x >> 16) ^ x;
+        seed ^= x + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+      }
+      return seed;
+    };
   };
 
 
-  Ngram() {}
+  Ngram() = default; 
+
   Ngram(Messages &messages, std::string const &user) : user(user) {
     std::set<char> vocab;
     for (std::string const &msg : messages[user])
       for (char c : msg)
         vocab.insert(c);
-    std::cout << "Vocab size -> " << vocab.size() << std::endl;
+    std::cout << "Vocab size is " << vocab.size() << std::endl;
 
     // mappings char -> int
     int index = 0;
@@ -105,39 +129,73 @@ struct Ngram {
     for (auto [c, i] : char_to_int)
       int_to_char[i] = c;
 
-    for (std::string const &msg : messages[user]) {
-      // starting character <S> n - 1 times
-      PrefixGram previous{(int)vocab.size()}; 
-      for (char c : msg) {
-        if (counts[previous].empty())
-          counts[previous].resize(vocab.size() + 2);
-        counts[previous][char_to_int[c]]++;
-        previous.add(char_to_int[c]);
+    int chunks = 4;
+    assert(chunks > 0);
+    int msgs_per_thread = messages[user].size() / chunks;
+    
+    int const START_CHAR = vocab.size();
+    int const END_CHAR = vocab.size() + 1;
+    // we add 2 fake characters - start, end
+    int const VOCAB_SIZE = vocab.size() + 2;
+
+    std::mutex cout_mutex;
+    std::mutex result_mutex;
+    auto handle_messages = [&](int thread_num) -> void {
+      cout_mutex.lock();
+      std::cout << "Thread " << thread_num << " started." << std::endl;
+      cout_mutex.unlock();
+
+      int from = thread_num * msgs_per_thread;
+      int to = std::min((thread_num + 1) * msgs_per_thread, (int)messages[user].size());
+      std::vector<std::pair<ContextWindow, int>> thread_results;
+      for (int i = from; i < to; i++) {
+        std::string const &msg = messages[user][i];
+
+        ContextWindow context_window{START_CHAR}; 
+        for (char c : msg) {
+          thread_results.emplace_back(context_window, char_to_int[c]);
+          context_window.add(char_to_int[c]);
+        }
+
+        thread_results.emplace_back(context_window, END_CHAR);
       }
-      // ending character <E>
-      if (counts[previous].empty())
-        counts[previous].resize(vocab.size() + 2);
-      counts[previous][vocab.size() + 1]++;
-    }
+
+      result_mutex.lock();
+      for (auto const &[context_window, next_char] : thread_results) {
+        if (counts[context_window].empty())
+          counts[context_window].resize(VOCAB_SIZE);
+        counts[context_window][next_char]++;
+      }
+      result_mutex.unlock();
+
+      cout_mutex.lock();
+      std::cout << "Thread " << thread_num << " finished." << std::endl;
+      cout_mutex.unlock();
+    };
+
+    std::vector<std::jthread> threads;
+    for (int i = 0; i < chunks; i++) 
+      threads.emplace_back(std::jthread(handle_messages, i));
   }
 
-  int next_character(PrefixGram previous_character_index) {
-    std::discrete_distribution<> d(std::begin(counts[previous_character_index]), std::end(counts[previous_character_index]));
+  int next_character(ContextWindow const &context_window) {
+    std::discrete_distribution<> d(std::begin(counts[context_window]), std::end(counts[context_window]));
     return d(gen);
   }
 
   std::string generate_sentence() {
     std::string sentence;
-    PrefixGram previous_character{(int)char_to_int.size()};
+    int const START_CHAR = (int)char_to_int.size();
+    ContextWindow context_window{START_CHAR};
     int next_char = 0;
-    while ((next_char = next_character(previous_character)) != char_to_int.size() + 1) { 
+    while ((next_char = next_character(context_window)) != char_to_int.size() + 1) { 
       sentence += int_to_char[next_char];
-      previous_character.add(next_char);
+      context_window.add(next_char);
     }
     return sentence; 
   }
 
-  std::map<PrefixGram, std::vector<int>> counts;
+  std::unordered_map<ContextWindow, std::vector<int>, ContextWindow_hash> counts;
   std::unordered_map<char, int> char_to_int;
   std::unordered_map<int, char> int_to_char;
   std::string user;
@@ -148,15 +206,15 @@ int main(int argc, char *argv[]) {
   std::string user_2{argv[2]};
   auto messages = filter_data(read_file("data.txt"), user_1, user_2);
 
-  std::cout << "msgs by " << user_1 << ": " << messages[user_1].size() << std::endl;
-  std::cout << "msgs by " << user_2 << ": " << messages[user_2].size() << std::endl;
+  std::cout << "Message count by " << user_1 << " is " << messages[user_1].size() << std::endl;
+  std::cout << "Message count by " << user_2 << " is " << messages[user_2].size() << std::endl;
 
-  Ngram<2> ngram1(messages, user_1);
-  Ngram<2> ngram2(messages, user_2);
-  for (int i = 0; i < 50; i++) {
+  Ngram<8> user_1_ngram(messages, user_1);
+  Ngram<8> user_2_ngram(messages, user_2);
+  for (int i = 0; i < 15; i++) {
     std::cout << i << ". " << user_1 << " says: " << std::endl;
-    std::cout << ngram1.generate_sentence() << std::endl;
+    std::cout << user_1_ngram.generate_sentence() << std::endl;
     std::cout << i << ". " << user_2 << " says: " << std::endl;
-    std::cout << ngram2.generate_sentence() << std::endl;
+    std::cout << user_2_ngram.generate_sentence() << std::endl;
   }
 }
