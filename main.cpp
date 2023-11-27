@@ -28,8 +28,9 @@ std::string read_file(std::string const &filename) {
   return data;
 }
 
-Messages filter_data(std::string const &data, bool filter_attachments = true, bool filter_embeds = true) {
-  std::regex new_msg_header_regex(R"(\[([0-9]+\/?)+ [0-9]+:[0-9]+\] (heon5|kadak9))");
+Messages filter_data(std::string const &data, std::string const &user_1, std::string const &user_2, bool filter_attachments = true, bool filter_embeds = true) {
+  std::string regex_str = R"(\[([0-9]+\/?)+ [0-9]+:[0-9]+\] ()" + user_1 + "|" + user_2 + ")"; 
+  std::regex new_msg_header_regex(regex_str);
   auto it_begin = std::sregex_iterator(std::begin(data), std::end(data), new_msg_header_regex);
   auto it_end = std::sregex_iterator();
 
@@ -64,9 +65,31 @@ Messages filter_data(std::string const &data, bool filter_attachments = true, bo
   return messages;
 } 
 
-struct Bigram {
-  Bigram() {}
-  Bigram(Messages &messages, std::string const &user) : user(user) {
+template<int n>
+struct Ngram {
+  struct PrefixGram {
+    PrefixGram() {}
+    PrefixGram(int character) {
+      for (int i = 0; i < n - 1; i++)
+        gram.push_back(character);
+    }
+
+    bool operator<(PrefixGram const &other) const {
+      return this->gram < other.gram;
+    }
+    
+    void add(int character) {
+      gram.push_back(character);
+      if (gram.size() == n)
+        gram.pop_front();
+    }
+
+    std::deque<int> gram;
+  };
+
+
+  Ngram() {}
+  Ngram(Messages &messages, std::string const &user) : user(user) {
     std::set<char> vocab;
     for (std::string const &msg : messages[user])
       for (char c : msg)
@@ -82,48 +105,58 @@ struct Bigram {
     for (auto [c, i] : char_to_int)
       int_to_char[i] = c;
 
-    counts.assign(vocab.size() + 2, std::vector<int>(vocab.size() + 2));
     for (std::string const &msg : messages[user]) {
-      // starting character <S>
-      int previous = vocab.size(); 
+      // starting character <S> n - 1 times
+      PrefixGram previous{(int)vocab.size()}; 
       for (char c : msg) {
+        if (counts[previous].empty())
+          counts[previous].resize(vocab.size() + 2);
         counts[previous][char_to_int[c]]++;
-        previous = char_to_int[c];
+        previous.add(char_to_int[c]);
       }
       // ending character <E>
+      if (counts[previous].empty())
+        counts[previous].resize(vocab.size() + 2);
       counts[previous][vocab.size() + 1]++;
     }
   }
 
-  int next_character(int previous_character_index) {
+  int next_character(PrefixGram previous_character_index) {
     std::discrete_distribution<> d(std::begin(counts[previous_character_index]), std::end(counts[previous_character_index]));
     return d(gen);
   }
 
   std::string generate_sentence() {
     std::string sentence;
-    int previous_character = char_to_int.size();
-    while ((previous_character = next_character(previous_character)) != char_to_int.size() + 1) 
-      sentence += int_to_char[previous_character]; 
+    PrefixGram previous_character{(int)char_to_int.size()};
+    int next_char = 0;
+    while ((next_char = next_character(previous_character)) != char_to_int.size() + 1) { 
+      sentence += int_to_char[next_char];
+      previous_character.add(next_char);
+    }
     return sentence; 
   }
 
-  std::vector<std::vector<int>> counts;
+  std::map<PrefixGram, std::vector<int>> counts;
   std::unordered_map<char, int> char_to_int;
   std::unordered_map<int, char> int_to_char;
   std::string user;
 };
 
-int main() {
-  auto messages = filter_data(read_file("data.txt"));
-  std::cout << "msgs by heon5: " << messages["heon5"].size() << std::endl;
-  std::cout << "msgs by kadak9: " << messages["kadak9"].size() << std::endl;
-  Bigram heon(messages, "heon5");
-  Bigram kadak(messages, "kadak9");
+int main(int argc, char *argv[]) {
+  std::string user_1{argv[1]};
+  std::string user_2{argv[2]};
+  auto messages = filter_data(read_file("data.txt"), user_1, user_2);
+
+  std::cout << "msgs by " << user_1 << ": " << messages[user_1].size() << std::endl;
+  std::cout << "msgs by " << user_2 << ": " << messages[user_2].size() << std::endl;
+
+  Ngram<2> ngram1(messages, user_1);
+  Ngram<2> ngram2(messages, user_2);
   for (int i = 0; i < 50; i++) {
-    std::cout << i << ". " << "kadak says: " << std::endl;
-    std::cout << kadak.generate_sentence() << std::endl;
-    std::cout << i << ". " << "heon says: " << std::endl;
-    std::cout << kadak.generate_sentence() << std::endl;
+    std::cout << i << ". " << user_1 << " says: " << std::endl;
+    std::cout << ngram1.generate_sentence() << std::endl;
+    std::cout << i << ". " << user_2 << " says: " << std::endl;
+    std::cout << ngram2.generate_sentence() << std::endl;
   }
 }
