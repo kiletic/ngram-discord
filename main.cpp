@@ -70,8 +70,10 @@ Messages filter_data(std::string const &data, std::string const &user_1, std::st
 } 
 
 template<int n>
-struct Ngram {
-  struct ContextWindow {
+class Ngram {
+public:
+  class ContextWindow {
+  public:
     ContextWindow() = default;
 
     ContextWindow(int character) {
@@ -112,67 +114,67 @@ struct Ngram {
 
   Ngram() = default; 
 
-  Ngram(Messages &messages, std::string const &user) : user(user), messages(messages) {}
+  Ngram(Messages &messages, std::string const &user) : m_user(user), m_messages(messages) {}
 
   void init() {
     std::set<char> vocab;
-    for (std::string const &msg : messages[user])
+    for (std::string const &msg : m_messages[m_user])
       for (char c : msg)
         vocab.insert(c);
     std::cout << "Vocab size is " << vocab.size() << std::endl;
 
     // mappings char -> int
-    int index = 0;
     for (char c : vocab)
-      char_to_int[c] = index++;
+      m_char_to_int[c] = m_char_to_int.size();
 
     // mappings int -> char
-    for (auto [c, i] : char_to_int)
-      int_to_char[i] = c;
+    for (auto [c, i] : m_char_to_int)
+      m_int_to_char[i] = c;
     
     int const START_CHAR = vocab.size();
     int const END_CHAR = vocab.size() + 1;
     // we add 2 fake characters - start, end
     int const VOCAB_SIZE = vocab.size() + 2;
 
-    for (auto const &msg : messages[user]) {
+    for (auto const &msg : m_messages[m_user]) {
 
       ContextWindow context_window{START_CHAR}; 
       for (char c : msg) {
-        if (counts[context_window].empty())
-          counts[context_window].resize(VOCAB_SIZE);
-        counts[context_window][char_to_int[c]]++;
-        context_window.add(char_to_int[c]);
+        if (m_counts[context_window].empty())
+          m_counts[context_window].resize(VOCAB_SIZE);
+        m_counts[context_window][m_char_to_int[c]]++;
+        context_window.add(m_char_to_int[c]);
       }
 
-      if (counts[context_window].empty())
-        counts[context_window].resize(VOCAB_SIZE);
-      counts[context_window][END_CHAR]++;
+      if (m_counts[context_window].empty())
+        m_counts[context_window].resize(VOCAB_SIZE);
+      m_counts[context_window][END_CHAR]++;
     }
   }
 
   int next_character(ContextWindow const &context_window) {
-    std::discrete_distribution<> d(std::begin(counts[context_window]), std::end(counts[context_window]));
+    std::discrete_distribution<> d(std::begin(m_counts[context_window]), std::end(m_counts[context_window]));
     return d(gen);
   }
 
   std::string generate_sentence() {
     std::string sentence;
-    int const START_CHAR = (int)char_to_int.size();
+    int const START_CHAR = m_char_to_int.size();
     ContextWindow context_window{START_CHAR};
     int next_char = 0;
-    while ((next_char = next_character(context_window)) != char_to_int.size() + 1) { 
-      sentence += int_to_char[next_char];
+    while ((next_char = next_character(context_window)) != m_char_to_int.size() + 1) { 
+      sentence += m_int_to_char[next_char];
       context_window.add(next_char);
     }
     return sentence; 
   }
 
-  Messages messages;
-  std::unordered_map<ContextWindow, std::vector<int>, ContextWindow_hash> counts;
-  std::unordered_map<char, int> char_to_int;
-  std::unordered_map<int, char> int_to_char;
-  std::string user;
+private:
+  Messages m_messages;
+  std::unordered_map<ContextWindow, std::vector<int>, ContextWindow_hash> m_counts;
+  std::unordered_map<char, int> m_char_to_int;
+  std::unordered_map<int, char> m_int_to_char;
+  std::string m_user;
 };
 
 int main(int argc, char *argv[]) {
@@ -183,7 +185,7 @@ int main(int argc, char *argv[]) {
   std::cout << "Message count by " << user_1 << " is " << messages[user_1].size() << std::endl;
   std::cout << "Message count by " << user_2 << " is " << messages[user_2].size() << std::endl;
 
-  int const n = 8;
+  int const n = 4;
   Ngram<n> user_1_ngram(messages, user_1);
   Ngram<n> user_2_ngram(messages, user_2);
   
