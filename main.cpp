@@ -129,54 +129,26 @@ struct Ngram {
     // mappings int -> char
     for (auto [c, i] : char_to_int)
       int_to_char[i] = c;
-
-    int chunks = 4;
-    assert(chunks > 0);
-    int msgs_per_thread = messages[user].size() / chunks;
     
     int const START_CHAR = vocab.size();
     int const END_CHAR = vocab.size() + 1;
     // we add 2 fake characters - start, end
     int const VOCAB_SIZE = vocab.size() + 2;
 
-    std::mutex cout_mutex;
-    std::mutex result_mutex;
-    auto handle_messages = [&](int thread_num) -> void {
-      cout_mutex.lock();
-      std::cout << "Thread " << thread_num << " started." << std::endl;
-      cout_mutex.unlock();
+    for (auto const &msg : messages[user]) {
 
-      int from = thread_num * msgs_per_thread;
-      int to = from + msgs_per_thread;
-      std::vector<std::pair<ContextWindow, int>> thread_results;
-      for (int i = from; i < to; i++) {
-        std::string const &msg = messages[user][i];
-
-        ContextWindow context_window{START_CHAR}; 
-        for (char c : msg) {
-          thread_results.emplace_back(context_window, char_to_int[c]);
-          context_window.add(char_to_int[c]);
-        }
-
-        thread_results.emplace_back(context_window, END_CHAR);
-      }
-
-      result_mutex.lock();
-      for (auto const &[context_window, next_char] : thread_results) {
+      ContextWindow context_window{START_CHAR}; 
+      for (char c : msg) {
         if (counts[context_window].empty())
           counts[context_window].resize(VOCAB_SIZE);
-        counts[context_window][next_char]++;
+        counts[context_window][char_to_int[c]]++;
+        context_window.add(char_to_int[c]);
       }
-      result_mutex.unlock();
 
-      cout_mutex.lock();
-      std::cout << "Thread " << thread_num << " finished." << std::endl;
-      cout_mutex.unlock();
-    };
-
-    std::vector<std::jthread> threads;
-    for (int i = 0; i < chunks; i++) 
-      threads.emplace_back(std::jthread(handle_messages, i));
+      if (counts[context_window].empty())
+        counts[context_window].resize(VOCAB_SIZE);
+      counts[context_window][END_CHAR]++;
+    }
   }
 
   int next_character(ContextWindow const &context_window) {
@@ -211,8 +183,9 @@ int main(int argc, char *argv[]) {
   std::cout << "Message count by " << user_1 << " is " << messages[user_1].size() << std::endl;
   std::cout << "Message count by " << user_2 << " is " << messages[user_2].size() << std::endl;
 
-  Ngram<8> user_1_ngram(messages, user_1);
-  Ngram<8> user_2_ngram(messages, user_2);
+  int const n = 8;
+  Ngram<n> user_1_ngram(messages, user_1);
+  Ngram<n> user_2_ngram(messages, user_2);
   
   std::jthread t1([&]{ user_1_ngram.init(); });
   std::jthread t2([&]{ user_2_ngram.init(); });
