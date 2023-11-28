@@ -79,10 +79,6 @@ struct Ngram {
         window.push_back(character);
     }
 
-    bool operator<(ContextWindow const &other) const {
-      return this->window < other.window;
-    }
-
     bool operator==(ContextWindow const &other) const {
       return this->window == other.window;
     }
@@ -146,7 +142,7 @@ struct Ngram {
       cout_mutex.unlock();
 
       int from = thread_num * msgs_per_thread;
-      int to = std::min((thread_num + 1) * msgs_per_thread, (int)messages[user].size());
+      int to = from + msgs_per_thread;
       std::vector<std::pair<ContextWindow, int>> thread_results;
       for (int i = from; i < to; i++) {
         std::string const &msg = messages[user][i];
