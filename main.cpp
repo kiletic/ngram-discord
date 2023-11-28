@@ -122,8 +122,8 @@ public:
   void init() {
     std::set<char> vocab;
     for (std::string const &msg : m_messages[m_user])
-      for (char c : msg)
-        vocab.insert(c);
+      vocab.insert(std::begin(msg), std::end(msg));
+
     std::cout << "Vocab size for " << m_user << " is " << vocab.size() << std::endl;
 
     // mappings char -> int
@@ -141,11 +141,14 @@ public:
 
     for (auto const &msg : m_messages[m_user]) {
       ContextWindow context_window{START_CHAR}; 
+
       for (char c : msg) {
         if (m_counts[context_window].empty())
           m_counts[context_window].resize(VOCAB_SIZE);
-        m_counts[context_window][m_char_to_int[c]]++;
-        context_window.add(m_char_to_int[c]);
+
+        int val = m_char_to_int[c];
+        m_counts[context_window][val]++;
+        context_window.add(val);
       }
 
       if (m_counts[context_window].empty())
@@ -155,8 +158,7 @@ public:
   }
 
   int next_character(ContextWindow const &context_window) {
-    std::discrete_distribution<> d(std::begin(m_counts[context_window]), std::end(m_counts[context_window]));
-    return d(gen);
+    return std::discrete_distribution{std::begin(m_counts[context_window]), std::end(m_counts[context_window])}(gen);
   }
 
   std::string generate_sentence() {
