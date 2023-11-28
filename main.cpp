@@ -75,12 +75,15 @@ struct Ngram {
     ContextWindow() = default;
 
     ContextWindow(int character) {
-      for (int i = 0; i < n - 1; i++)
-        window.push_back(character);
+      window.assign(n - 1, character);
     }
 
     bool operator==(ContextWindow const &other) const {
       return this->window == other.window;
+    }
+
+    size_t size() const {
+      return window.size(); 
     }
     
     void add(int character) {
@@ -95,7 +98,7 @@ struct Ngram {
   // https://stackoverflow.com/a/72073933 
   struct ContextWindow_hash {
     std::size_t operator()(ContextWindow const &cw) const {
-      std::size_t seed = cw.window.size(); 
+      std::size_t seed = cw.size(); 
       for (auto x : cw.window) {
         x = ((x >> 16) ^ x) * 0x45d9f3b;
         x = ((x >> 16) ^ x) * 0x45d9f3b;
@@ -109,7 +112,9 @@ struct Ngram {
 
   Ngram() = default; 
 
-  Ngram(Messages &messages, std::string const &user) : user(user) {
+  Ngram(Messages &messages, std::string const &user) : user(user), messages(messages) {}
+
+  void init() {
     std::set<char> vocab;
     for (std::string const &msg : messages[user])
       for (char c : msg)
@@ -191,6 +196,7 @@ struct Ngram {
     return sentence; 
   }
 
+  Messages messages;
   std::unordered_map<ContextWindow, std::vector<int>, ContextWindow_hash> counts;
   std::unordered_map<char, int> char_to_int;
   std::unordered_map<int, char> int_to_char;
@@ -207,6 +213,13 @@ int main(int argc, char *argv[]) {
 
   Ngram<8> user_1_ngram(messages, user_1);
   Ngram<8> user_2_ngram(messages, user_2);
+  
+  std::jthread t1([&]{ user_1_ngram.init(); });
+  std::jthread t2([&]{ user_2_ngram.init(); });
+
+  t1.join();
+  t2.join();
+
   for (int i = 0; i < 15; i++) {
     std::cout << i << ". " << user_1 << " says: " << std::endl;
     std::cout << user_1_ngram.generate_sentence() << std::endl;
