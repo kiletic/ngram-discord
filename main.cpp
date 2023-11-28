@@ -137,7 +137,6 @@ public:
     int const VOCAB_SIZE = vocab.size() + 2;
 
     for (auto const &msg : m_messages[m_user]) {
-
       ContextWindow context_window{START_CHAR}; 
       for (char c : msg) {
         if (m_counts[context_window].empty())
