@@ -9,6 +9,7 @@
 #include <vector>
 #include <thread>
 #include <cassert>
+#include <chrono>
 
 using Messages = std::unordered_map<std::string, std::vector<std::string>>;
 
@@ -38,32 +39,34 @@ Messages filter_data(std::string const &data, std::string const &user_1, std::st
   auto it_begin = std::sregex_iterator(std::begin(data), std::end(data), new_msg_header_regex);
   auto it_end = std::sregex_iterator();
 
-  std::cout << "Message count is " << std::distance(it_begin, it_end) << std::endl;
+  int const total_msg_count = std::distance(it_begin, it_end);
+  std::cout << "Message count is " << total_msg_count << std::endl;
   
   Messages messages;
+  messages[user_1].reserve(total_msg_count);
+  messages[user_2].reserve(total_msg_count);
   while (it_begin != it_end) {
     auto match = *it_begin;
-    auto next_it = std::next(it_begin);
+    auto next_it = ++it_begin;
 
     int msg_start = match.position() + match.length();
     int msg_end = (next_it == it_end ? data.size() : next_it->position());
-    
-    // pattern is: `[date time] user`, so we find ] and then increment by 2 to get first character of user
-    int pos = data.find("]", match.position()) + 2;
-    std::string user = data.substr(pos, match.length() - (pos - match.position()));
+
+    // pattern is: `[date time] user`, the [date time] part is always 17 characters long so at offset 19 user name starts 
+    int user_start_pos = match.position() + 19;
+    assert(data[user_start_pos - 1] == ' ' && data[user_start_pos - 2] == ']');
+    std::string user = data.substr(user_start_pos, match.length() - (user_start_pos - match.position()));
 
     // TODO: why +2 on msg_start gets rid of '\n'?
     std::string msg = data.substr(msg_start + 2, msg_end - (msg_start + 2));
 
     bool skip = false;
-    if (filter_attachments && msg.find("{Attachments}") != std::string::npos)
-      skip = true;
     if (filter_embeds && msg.find("{Embed}") != std::string::npos)
       skip = true;
+    if (!skip && filter_attachments && msg.find("{Attachments}") != std::string::npos)
+      skip = true;
     if (!skip)
-      messages[user].push_back(msg);
-
-    it_begin++;
+      messages[user].push_back(std::move(msg));
   }
 
   return messages;
@@ -121,7 +124,7 @@ public:
     for (std::string const &msg : m_messages[m_user])
       for (char c : msg)
         vocab.insert(c);
-    std::cout << "Vocab size is " << vocab.size() << std::endl;
+    std::cout << "Vocab size for " << m_user << " is " << vocab.size() << std::endl;
 
     // mappings char -> int
     for (char c : vocab)
@@ -179,12 +182,16 @@ private:
 int main(int argc, char *argv[]) {
   std::string user_1{argv[1]};
   std::string user_2{argv[2]};
+
+  std::chrono::steady_clock::steady_clock::time_point a = std::chrono::steady_clock::now();
   auto messages = filter_data(read_file("data.txt"), user_1, user_2);
+  std::chrono::steady_clock::steady_clock::time_point b = std::chrono::steady_clock::now();
+  std::cout << "Time taken for filter_data is " << std::chrono::duration_cast<std::chrono::milliseconds>(b - a).count() << " ms." << std::endl;
 
   std::cout << "Message count by " << user_1 << " is " << messages[user_1].size() << std::endl;
   std::cout << "Message count by " << user_2 << " is " << messages[user_2].size() << std::endl;
 
-  int const n = 4;
+  int const n = 8;
   Ngram<n> user_1_ngram(messages, user_1);
   Ngram<n> user_2_ngram(messages, user_2);
   
