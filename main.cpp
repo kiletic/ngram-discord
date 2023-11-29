@@ -114,7 +114,6 @@ public:
     };
   };
 
-
   Ngram() = default; 
 
   Ngram(Messages &messages, std::string const &user) : m_user(user), m_messages(messages) {}

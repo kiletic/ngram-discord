@@ -8,7 +8,7 @@ This is a CLI program that builds a n-gram language model on a character level f
 >**Note:** Make sure you enter your discord token into `INSERT_YOUR_TOKEN_HERE` and the channel id into `INSERT_CHANNEL_ID`. [How to get the token and the channel_id?](https://github.com/Tyrrrz/DiscordChatExporter/blob/master/.docs/Token-and-IDs.md)
 3. Compile `main.cpp` with: `c++ -std=c++20 main.cpp -o main`
 4. Run the program: `./main INSERT_USER1_NAME INSERT_USER2_NAME`  
-  >**Note**: Inserted names should be actual **discord usernames** and not display names. It doesn't matter in which order you write them in.
+  >**Note**: Inserted names should be actual **discord usernames** as they appear in `data.txt`, and not display names. It doesn't matter in which order you write them in.
 
 ## How does it work?
 It parses the `data.txt` file for messages from both users, optionally skipping messages that contain embeddings or attachments (this can be changed by setting `filter_attachments` and `filter_embeds` to `false` when calling the `filter_data` function). Then, it builds a n-gram language model on a character level from the messages (to read more about the math check [wiki](https://en.wikipedia.org/wiki/Word_n-gram_language_model)). Finally, to use the model just call the `generate_sentence` function.
