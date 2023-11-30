@@ -163,9 +163,10 @@ public:
   std::string generate_sentence() {
     std::string sentence;
     int const START_CHAR = m_char_to_int.size();
+    int const END_CHAR = m_char_to_int.size() + 1;
     ContextWindow context_window{START_CHAR};
     int next_char = 0;
-    while ((next_char = next_character(context_window)) != m_char_to_int.size() + 1) { 
+    while ((next_char = next_character(context_window)) != END_CHAR) { 
       sentence += m_int_to_char[next_char];
       context_window.add(next_char);
     }
