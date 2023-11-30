@@ -57,7 +57,7 @@ Messages filter_data(std::string const &data, std::string const &user_1, std::st
     assert(data[user_start_pos - 1] == ' ' && data[user_start_pos - 2] == ']');
     std::string user = data.substr(user_start_pos, match.length() - (user_start_pos - match.position()));
 
-    // TODO: why +2 on msg_start gets rid of '\n'?
+    // +2 on msg_start because of "\r\n" 
     std::string msg = data.substr(msg_start + 2, msg_end - (msg_start + 2));
 
     bool skip = false;
